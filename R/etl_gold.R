@@ -53,6 +53,8 @@ etl_gold <- function(input_dir_silver, output_dir_gold) {
       coalesce(COD_CENTRO, ''),
       coalesce(ACEPTADO_RECHAZADO, ''),
       coalesce(PREVISION, ''),
+      coalesce(GENERO, ''),
+      coalesce(TRAMO, ''),
       anio, mes
     )) AS ROW_HASH,
 
