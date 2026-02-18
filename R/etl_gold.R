@@ -107,17 +107,42 @@ etl_gold <- function(input_dir_silver, output_dir_gold) {
   dbExecute(con, sql_dedup)
 
   # 5. Exportar CLEAN (rn = 1) -> Monolítico
-  cat("   -> Exportando GOLD CLEAN (Monolítico)...\n")
+  # 5. Exportar GOLD CLEAN (Optimización Senior)
+  cat("   -> Exportando GOLD CLEAN (Monolítico, Optimizado y Sin Basura)...\n")
 
-  # Limpiar versiones anteriores para evitar acumulacion
+  # Limpieza de archivos previos
   old_files <- list.files(output_clean, pattern = "PIV_MASTER_GOLD_.*\\.parquet", full.names = TRUE)
   if (length(old_files) > 0) file.remove(old_files)
 
-  # Generar nombre con timestamp YYMMDD_HHMM
   timestamp <- format(Sys.time(), "%y%m%d_%H%M")
   final_parquet_file <- file.path(output_clean, glue("PIV_MASTER_GOLD_{timestamp}.parquet"))
 
-  dbExecute(con, glue("COPY (SELECT * EXCLUDE(rn) FROM gold_final_logic WHERE rn = 1 AND DSM_TCO = 'SI') TO '{final_parquet_file}' (FORMAT PARQUET)"))
+  # --- LA MAGIA ESTÁ AQUÍ ---
+  sql_export <- glue("
+      COPY (
+        SELECT
+            * EXCLUDE(rn, ROW_HASH) -- 1. ELIMINAMOS COLUMNAS DE PROCESO (Basura en Gold)
+        FROM gold_final_logic
+        WHERE rn = 1
+          AND DSM_TCO = 'SI'
+        ORDER BY
+            NOMBRE_CENTRO ASC,      -- 2. CLUSTERING: Agrupa datos por centro (Mejor compresión)
+            FECHA_CORTE ASC,        -- Orden Cronológico
+            GENERO_NORMALIZADO,     -- Agrupa Strings repetidos
+            GRUPO_ETARIO            -- Agrupa Strings repetidos
+      ) TO '{final_parquet_file}'
+      (
+        FORMAT PARQUET,
+        COMPRESSION 'ZSTD',         -- 3. ALGORITMO: Estándar moderno (mejor que Snappy)
+        COMPRESSION_LEVEL 10,       -- NIVEL: 10 es agresivo pero seguro para lectura
+        ROW_GROUP_SIZE 1000000      -- BLOQUES: 1M filas por bloque optimiza metadatos para 22M regs
+      )
+  ")
+
+  dbExecute(con, sql_export)
+
+  # Validación Post-Exportación (Opcional pero recomendado)
+  cat(paste0("   [EXITO] Archivo generado: ", basename(final_parquet_file), "\n"))
 
   # 6. Exportar QUARANTINE (rn > 1)
   count_duplicates <- dbGetQuery(con, "SELECT COUNT(*) as n FROM gold_final_logic WHERE rn > 1")$n
