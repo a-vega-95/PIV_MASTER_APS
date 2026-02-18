@@ -52,7 +52,6 @@ etl_gold <- function(input_dir_silver, output_dir_gold) {
       coalesce(NOMBRE_CENTRO, ''),
       coalesce(COD_CENTRO, ''),
       coalesce(ACEPTADO_RECHAZADO, ''),
-      coalesce(PREVISION, ''),
       coalesce(GENERO, ''),
       coalesce(TRAMO, ''),
       anio, mes
@@ -61,7 +60,7 @@ etl_gold <- function(input_dir_silver, output_dir_gold) {
     -- Logica de Negocio
     regexp_replace(RUN || DV, '[^0-9Kk]', '', 'g') AS ID_PCTE,
     CASE WHEN NOMBRE_CENTRO IN (", centros_sql, ") THEN 'SI' ELSE 'NO' END AS DSM_TCO,
-    date_diff('year', FECHA_NACIMIENTO, FECHA_CORTE) AS EDAD,
+    date_diff('year', FECHA_NACIMIENTO, FECHA_CORTE) AS EDAD_EN_FECHA_CORTE,
     CASE
       WHEN date_diff('year', FECHA_NACIMIENTO, FECHA_CORTE) < 1 THEN 'Menos de 1 año'
       WHEN date_diff('year', FECHA_NACIMIENTO, FECHA_CORTE) BETWEEN 1 AND 4 THEN '1 - 4 años'

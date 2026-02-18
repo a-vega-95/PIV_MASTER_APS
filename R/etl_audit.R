@@ -83,7 +83,6 @@ etl_audit <- function(dir_bronce, dir_silver, dir_gold, output_dir_report) {
             coalesce(NOMBRE_CENTRO, ''),
             coalesce(COD_CENTRO, ''),
             coalesce(ACEPTADO_RECHAZADO, ''),
-            coalesce(PREVISION, ''),
             coalesce(GENERO, ''),
             coalesce(TRAMO, '')
         )) as h_id FROM v_silver),
@@ -94,7 +93,6 @@ etl_audit <- function(dir_bronce, dir_silver, dir_gold, output_dir_report) {
             coalesce(NOMBRE_CENTRO, ''),
             coalesce(COD_CENTRO, ''),
             coalesce(ACEPTADO_RECHAZADO, ''),
-            coalesce(PREVISION, ''),
             coalesce(GENERO, ''),
             coalesce(TRAMO, '')
         )) as h_id FROM v_gold)

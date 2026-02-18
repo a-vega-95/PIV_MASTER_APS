@@ -40,7 +40,6 @@ etl_transform <- function(input_dir_bronze, output_dir_silver) {
     col_cen <- get_coalesce(c("NOMBRE_CENTRO", "CENTRO_SALUD", "ESTABLECIMIENTO"))
     col_cod <- get_coalesce(c("COD_CENTRO", "CODIGO_CENTRO", "CODIGO_CENTRO_PROCEDENCIA"))
     col_ace <- get_coalesce(c("ACEPTADO_RECHAZADO", "SITUACION", "ESTADO"))
-    col_pre <- get_coalesce(c("PREVISION"))
     col_gen <- get_coalesce(c("GENERO", "SEXO"))
     col_tra <- get_coalesce(c("TRAMO", "TRAMO_PREVISION", "NIVEL"))
 
@@ -74,7 +73,6 @@ etl_transform <- function(input_dir_bronze, output_dir_silver) {
     TRIM(UPPER({col_cen})) AS NOMBRE_CENTRO,
     TRIM(UPPER({col_cod})) AS COD_CENTRO,
     TRIM(UPPER({col_ace})) AS ACEPTADO_RECHAZADO,
-    TRIM(UPPER({col_pre})) AS PREVISION,
     TRIM(UPPER({col_gen})) AS GENERO,
     TRIM(UPPER({col_tra})) AS TRAMO,
     anio, mes,
