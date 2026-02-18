@@ -61,7 +61,26 @@ tryCatch(
         total_silver <- nrow(arrow::open_dataset(dir_silver))
       }
 
-      log_msg(sprintf("RESUMEN TOTALES: Entrada=%d | Bronze=%d | Silver=%d", total_entrada, total_bronce, total_silver), "METRICS")
+      # 4. Gold (Monolithic + Quarantine)
+      dir_gold <- here::here("DATOS", "DATOS_GOLD")
+      file_gold <- file.path(dir_gold, "DATASET_FINAL", "GOLD_DATASET.parquet")
+      file_quarantine <- file.path(dir_gold, "QUARANTINE_DUPLICATOS", "QUARANTINE_DUPLICATES.parquet")
+
+      total_gold <- 0
+      total_quarantine <- 0
+
+      if (file.exists(file_gold)) {
+        total_gold <- nrow(arrow::read_parquet(file_gold))
+      }
+
+      if (file.exists(file_quarantine)) {
+        total_quarantine <- nrow(arrow::read_parquet(file_quarantine))
+      }
+
+      log_msg(sprintf(
+        "RESUMEN TOTALES: Entrada=%d | Bronze=%d | Silver=%d | Gold=%d | Cuarentena=%d",
+        total_entrada, total_bronce, total_silver, total_gold, total_quarantine
+      ), "METRICS")
     })
   },
   error = function(e) {

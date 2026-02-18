@@ -19,7 +19,7 @@ La lógica de negocio ahora está separada por capas:
 
 *   **`R/etl_extract.R`** (Capa Bronze): Ingesta de archivos TXT a Parquet crudo.
 *   **`R/etl_transform.R`** (Capa Silver): Limpieza, tipado y estandarización de datos.
-*   **`R/etl_gold.R`** (Capa Gold): Reglas de negocio (Grupos Etarios, Flags DSM).
+*   **`R/etl_gold.R`** (Capa Gold): Genera **Dataset Monolítico Final** (sin duplicados) y mueve registros repetidos (hash SHA256) a **Cuarentena**.
 *   **R/etl_audit.R** (Auditoría): Generación de reportes de calidad e integridad.
 
 ## 🚀 Orden de Ejecución

@@ -12,8 +12,14 @@ etl_audit <- function(dir_bronce, dir_silver, dir_gold, output_dir_report) {
     con <- dbConnect(duckdb::duckdb())
     on.exit(dbDisconnect(con, shutdown = TRUE))
 
-    # Register Views Globally for all periods (simpler) or iterate?
-    # Iterating is better to produce granular counts per period.
+    # Path to monolithic Gold
+    path_gold_file <- file.path(dir_gold, "DATASET_FINAL", "GOLD_DATASET.parquet")
+    has_gold <- file.exists(path_gold_file)
+
+    if (has_gold) {
+        # Create View for ENTIRE Gold dataset once (Optimization)
+        dbExecute(con, glue("CREATE OR REPLACE VIEW v_gold_full AS SELECT * FROM read_parquet('{path_gold_file}')"))
+    }
 
     dirs_anio <- dir(dir_silver, pattern = "anio=", full.names = TRUE)
 
@@ -32,18 +38,20 @@ etl_audit <- function(dir_bronce, dir_silver, dir_gold, output_dir_report) {
 
             path_bronce <- file.path(dir_bronce, paste0("anio=", anio), paste0("mes=", mes))
             path_silver <- file.path(dir_silver, paste0("anio=", anio), paste0("mes=", mes))
-            path_gold <- file.path(dir_gold, paste0("anio=", anio), paste0("mes=", mes))
 
             if (!dir.exists(path_bronce)) next
 
-            # Define views for this period
+            # Define views for this period (Bronze/Silver still Partitioned)
             dbExecute(con, glue("CREATE OR REPLACE VIEW v_bronce AS SELECT * FROM read_parquet('{path_bronce}/*.parquet')"))
 
             has_silver <- dir.exists(path_silver)
             if (has_silver) dbExecute(con, glue("CREATE OR REPLACE VIEW v_silver AS SELECT * FROM read_parquet('{path_silver}/*.parquet')"))
 
-            has_gold <- dir.exists(path_gold)
-            if (has_gold) dbExecute(con, glue("CREATE OR REPLACE VIEW v_gold AS SELECT * FROM read_parquet('{path_gold}/*.parquet')"))
+            # Filter Gold View for this period
+            if (has_gold) {
+                # Cast anio/mes to correct type if needed, but parquet should match.
+                dbExecute(con, glue("CREATE OR REPLACE VIEW v_gold AS SELECT * FROM v_gold_full WHERE anio={anio} AND mes={mes}"))
+            }
 
             resumen <- data.frame(ETAPA = character(), IN = integer(), OUT = integer(), DIFF = integer(), PCT = numeric())
 
@@ -68,8 +76,12 @@ etl_audit <- function(dir_bronce, dir_silver, dir_gold, output_dir_report) {
         "
                 n_missing <- dbGetQuery(con, sql_missing)$missing
 
+                # DIFF logic change: Gold has FEWER rows due to deduplication.
+                # So n_gold < n_silver is EXPECTED now.
+                # n_missing represents rows in Silver NOT in Gold (duplicates removed or lost).
+
                 resumen <- rbind(resumen, data.frame(
-                    ETAPA = "SILVER_VS_GOLD", IN = n_silver, OUT = n_gold, DIFF = n_missing, PCT = ((n_silver - n_missing) / n_silver) * 100
+                    ETAPA = "SILVER_VS_GOLD_DEDUP", IN = n_silver, OUT = n_gold, DIFF = n_silver - n_gold, PCT = (n_gold / n_silver) * 100
                 ))
             }
 

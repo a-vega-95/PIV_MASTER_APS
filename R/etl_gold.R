@@ -1,32 +1,62 @@
 # R/etl_gold.R
+# R/etl_gold.R
 etl_gold <- function(input_dir_silver, output_dir_gold) {
-    require(duckdb)
-    require(dplyr)
-    require(arrow)
-    require(glue)
+  require(duckdb)
+  require(dplyr)
+  require(arrow)
+  require(glue)
+  require(openssl)
 
-    if (!dir.exists(input_dir_silver)) stop("No Silver")
-    if (!dir.exists(output_dir_gold)) dir.create(output_dir_gold, recursive = TRUE)
+  if (!dir.exists(input_dir_silver)) stop("No Silver")
 
-    con <- dbConnect(duckdb::duckdb())
-    on.exit(dbDisconnect(con, shutdown = TRUE))
+  # Directorios de salida
+  output_clean <- file.path(output_dir_gold, "DATASET_FINAL")
+  output_quarantine <- file.path(output_dir_gold, "QUARANTINE_DUPLICATOS")
 
-    ds_silver <- arrow::open_dataset(input_dir_silver)
-    arrow::to_duckdb(ds_silver, table_name = "silver_view", con = con)
+  if (dir.exists(output_dir_gold)) fs::dir_delete(output_dir_gold)
+  dir.create(output_clean, recursive = TRUE)
+  dir.create(output_quarantine, recursive = TRUE)
 
-    centros_dsm <- c(
-        "CENTRO DE SALUD FAMILIAR AMANECER", "CENTRO COMUNITARIO DE SALUD FAMILIAR ARQUENCO",
-        "CENTRO DE SALUD FAMILIAR EL CARMEN", "CENTRO COMUNITARIO DE SALUD FAMILIAR VILLA EL SALAR",
-        "CENTRO DE SALUD FAMILIAR LABRANZA", "CENTRO COMUNITARIO DE SALUD FAMILIAR LAS QUILAS",
-        "CENTRO DE SALUD DOCENTE ASISTENCIAL MONSEÑOR SERGIO VALECH", "CENTRO DE SALUD FAMILIAR PEDRO DE VALDIVIA (TEMUCO)",
-        "POSTA DE SALUD RURAL COLLIMALLÍN", "POSTA DE SALUD RURAL CONOCO", "CENTRO DE SALUD FAMILIAR PUEBLO NUEVO",
-        "CENTRO DE SALUD FAMILIAR SANTA ROSA", "CENTRO DE SALUD FAMILIAR VILLA ALEGRE (TEMUCO)"
-    )
-    centros_sql <- paste(sprintf("'%s'", centros_dsm), collapse = ", ")
+  con <- dbConnect(duckdb::duckdb())
+  on.exit(dbDisconnect(con, shutdown = TRUE))
 
-    sql_gold <- paste0("
-  CREATE OR REPLACE TABLE gold_temp AS
+  # 1. Cargar Silver
+  ds_silver <- arrow::open_dataset(input_dir_silver)
+  arrow::to_duckdb(ds_silver, table_name = "silver_view", con = con)
+
+  # 2. Centros DSM Mapping
+  centros_dsm <- c(
+    "CENTRO DE SALUD FAMILIAR AMANECER", "CENTRO COMUNITARIO DE SALUD FAMILIAR ARQUENCO",
+    "CENTRO DE SALUD FAMILIAR EL CARMEN", "CENTRO COMUNITARIO DE SALUD FAMILIAR VILLA EL SALAR",
+    "CENTRO DE SALUD FAMILIAR LABRANZA", "CENTRO COMUNITARIO DE SALUD FAMILIAR LAS QUILAS",
+    "CENTRO DE SALUD DOCENTE ASISTENCIAL MONSEÑOR SERGIO VALECH", "CENTRO DE SALUD FAMILIAR PEDRO DE VALDIVIA (TEMUCO)",
+    "POSTA DE SALUD RURAL COLLIMALLÍN", "POSTA DE SALUD RURAL CONOCO", "CENTRO DE SALUD FAMILIAR PUEBLO NUEVO",
+    "CENTRO DE SALUD FAMILIAR SANTA ROSA", "CENTRO DE SALUD FAMILIAR VILLA ALEGRE (TEMUCO)"
+  )
+  centros_sql <- paste(sprintf("'%s'", centros_dsm), collapse = ", ")
+
+  cat("\n🌟 [ELT-GOLD] Generando RAW con Hash SHA256...\n")
+
+  # 3. Preparar Base + Hash SHA256
+  # Definimos la llave única de negocio: RUN-DV-FECHA_CORTE-COD_CENTRO-ESTADO
+  # Si hay múltiples registros iguales en la misma fecha corte para el mismo centro y estado, son duplicados.
+
+  sql_staging <- paste0("
+  CREATE OR REPLACE TABLE gold_staging AS
   SELECT *,
+    -- Generar Hash SHA256 sobre TODA la fila (excluyendo metadatos logísticos si los hubiera, pero aquí queremos validación extensa)
+    sha256(concat(
+      RUN, DV,
+      coalesce(cast(FECHA_NACIMIENTO as VARCHAR), ''),
+      coalesce(cast(FECHA_CORTE as VARCHAR), ''),
+      coalesce(NOMBRE_CENTRO, ''),
+      coalesce(COD_CENTRO, ''),
+      coalesce(ACEPTADO_RECHAZADO, ''),
+      coalesce(PREVISION, ''),
+      anio, mes
+    )) AS ROW_HASH,
+
+    -- Logica de Negocio
     regexp_replace(RUN || DV, '[^0-9Kk]', '', 'g') AS ID_PCTE,
     CASE WHEN NOMBRE_CENTRO IN (", centros_sql, ") THEN 'SI' ELSE 'NO' END AS DSM_TCO,
     date_diff('year', FECHA_NACIMIENTO, FECHA_CORTE) AS EDAD,
@@ -53,9 +83,38 @@ etl_gold <- function(input_dir_silver, output_dir_gold) {
     END AS GRUPO_ETARIO
   FROM silver_view
   ")
+  dbExecute(con, sql_staging)
 
-    dbExecute(con, sql_gold)
-    dbExecute(con, paste0("COPY (SELECT * FROM gold_temp) TO '", output_dir_gold, "' (FORMAT PARQUET, PARTITION_BY (anio, mes), OVERWRITE_OR_IGNORE)"))
+  cat("   -> Identificando Duplicados...\n")
 
-    return(output_dir_gold)
+  # 4. Separar Duplicados usando Window Function
+  # ROW_NUMBER() particionado por el Hash. Si > 1, es duplicado.
+  sql_dedup <- "
+  CREATE OR REPLACE TABLE gold_final_logic AS
+  SELECT *,
+    ROW_NUMBER() OVER (PARTITION BY ROW_HASH ORDER BY source_file DESC) as rn
+  FROM gold_staging
+  "
+  dbExecute(con, sql_dedup)
+
+  # 5. Exportar CLEAN (rn = 1) -> Monolítico
+  cat("   -> Exportando GOLD CLEAN (Monolítico)...\n")
+  # Exportamos como SINGLE FILE PARQUET (sin hive partitioning)
+  # DuckDB COPY TO puede escribir single file si terminamos en extension .parquet
+  final_parquet_file <- file.path(output_clean, "GOLD_DATASET.parquet")
+
+  dbExecute(con, glue("COPY (SELECT * EXCLUDE(rn) FROM gold_final_logic WHERE rn = 1) TO '{final_parquet_file}' (FORMAT PARQUET)"))
+
+  # 6. Exportar QUARANTINE (rn > 1)
+  count_duplicates <- dbGetQuery(con, "SELECT COUNT(*) as n FROM gold_final_logic WHERE rn > 1")$n
+
+  if (count_duplicates > 0) {
+    cat(sprintf("   ⚠️  Se encontraron %d registros duplicados. Moviendo a Cuarentena...\n", count_duplicates))
+    quarantine_file <- file.path(output_quarantine, "QUARANTINE_DUPLICATES.parquet")
+    dbExecute(con, glue("COPY (SELECT * FROM gold_final_logic WHERE rn > 1) TO '{quarantine_file}' (FORMAT PARQUET)"))
+  } else {
+    cat("   ✅ No se encontraron duplicados.\n")
+  }
+
+  return(output_clean)
 }

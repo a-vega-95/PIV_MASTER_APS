@@ -31,7 +31,9 @@ Este script se encarga de:
 *   **`DATOS/DATOS_ENTRADA/`**: Archivos TXT crudos de origen.
 *   **`DATOS/DATOS_BRONCE/`**: Copia exacta en formato Parquet (con particionado Hive).
 *   **`DATOS/DATOS_SILVER/`**: Datos limpios y tipados (Parquet).
-*   **`DATOS/DATOS_GOLD/`**: Datos enriquecidos con reglas de negocio.
+*   **`DATOS/DATOS_GOLD/`**:
+    *   `DATASET_FINAL/GOLD_DATASET.parquet`: **Monolítico**. Dataset final limpio y validado (Sin duplicados).
+    *   `QUARANTINE_DUPLICATOS/`: Registros duplicados detectados por SHA256.
 
 ### Auditoría y Logs
 *   **`ETL/LOG_ETL/ETL_EXECUTION.log`**: **Log Maestro**. Historial acumulativo.
