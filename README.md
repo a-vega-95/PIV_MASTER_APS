@@ -32,7 +32,7 @@ Este script se encarga de:
 *   **`DATOS/DATOS_BRONCE/`**: Copia exacta en formato Parquet (con particionado Hive).
 *   **`DATOS/DATOS_SILVER/`**: Datos limpios y tipados (Parquet).
 *   **`DATOS/DATOS_GOLD/`**:
-    *   `DATASET_FINAL/GOLD_DATASET.parquet`: **Monolitico**. Dataset final limpio y validado (Sin duplicados).
+    *   `DATASET_FINAL/PIV_MASTER_GOLD_YYMMDD_HHMM.parquet`: **Monolitico**. Dataset final limpio y validado (Sin duplicados, nombre con timestamp dinámico).
     *   `QUARANTINE_DUPLICATOS/`: Registros duplicados detectados por SHA256.
 
 ### Auditoria y Logs

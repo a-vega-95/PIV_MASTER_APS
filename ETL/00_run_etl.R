@@ -63,7 +63,13 @@ tryCatch(
 
       # 4. Gold (Monolithic + Quarantine)
       dir_gold <- here::here("DATOS", "DATOS_GOLD")
-      file_gold <- file.path(dir_gold, "DATASET_FINAL", "GOLD_DATASET.parquet")
+
+      # Buscar el último archivo generado por timestamp
+      path_gold_dir <- file.path(dir_gold, "DATASET_FINAL")
+      gold_files <- list.files(path_gold_dir, pattern = "PIV_MASTER_GOLD_.*\\.parquet", full.names = TRUE)
+
+      file_gold <- if (length(gold_files) > 0) tail(sort(gold_files), 1) else ""
+
       file_quarantine <- file.path(dir_gold, "QUARANTINE_DUPLICATOS", "QUARANTINE_DUPLICATES.parquet")
 
       total_gold <- 0

@@ -48,8 +48,21 @@ etl_transform <- function(input_dir_bronze, output_dir_silver) {
     col_src <- "source_file"
     if (!("source_file" %in% cols_bronce)) col_src <- "'Unknown'"
 
-    sql_nac <- glue("COALESCE(try_strptime(TRIM({col_nac}), '%d/%m/%Y'), try_strptime(TRIM({col_nac}), '%Y-%m-%d'), NULL)")
-    sql_cor <- glue("COALESCE(try_strptime(TRIM({col_cor}), '%d/%m/%Y'), try_strptime(TRIM({col_cor}), '%Y-%m-%d'), NULL)")
+    # Mejorar parsing de fechas: Intentar varios formatos conocidos
+    # Formatos posibles: DD/MM/YYYY, YYYY-MM-DD, DD-MM-YYYY
+    sql_nac <- glue("COALESCE(
+        try_strptime(TRIM({col_nac}), '%d/%m/%Y'),
+        try_strptime(TRIM({col_nac}), '%Y-%m-%d'),
+        try_strptime(TRIM({col_nac}), '%d-%m-%Y'),
+        NULL
+    )")
+
+    sql_cor <- glue("COALESCE(
+        try_strptime(TRIM({col_cor}), '%d/%m/%Y'),
+        try_strptime(TRIM({col_cor}), '%Y-%m-%d'),
+        try_strptime(TRIM({col_cor}), '%d-%m-%Y'),
+        NULL
+    )")
 
     sql_transform <- glue("
   CREATE OR REPLACE TABLE silver_temp AS

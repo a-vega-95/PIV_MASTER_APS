@@ -12,8 +12,13 @@ etl_audit <- function(dir_bronce, dir_silver, dir_gold, output_dir_report) {
     con <- dbConnect(duckdb::duckdb())
     on.exit(dbDisconnect(con, shutdown = TRUE))
 
-    # Path to monolithic Gold
-    path_gold_file <- file.path(dir_gold, "DATASET_FINAL", "GOLD_DATASET.parquet")
+    # Path to monolithic Gold (Dynamic Timestamp)
+    # Buscamos el archivo PIV_MASTER_GOLD_YYMMDD_HHMM.parquet más reciente
+    path_gold_dir <- file.path(dir_gold, "DATASET_FINAL")
+    gold_files <- list.files(path_gold_dir, pattern = "PIV_MASTER_GOLD_.*\\.parquet", full.names = TRUE)
+
+    # Asumimos que hay uno solo si limpiamos antes, o tomamos el último alfabéticamente (fecha más reciente)
+    path_gold_file <- if (length(gold_files) > 0) tail(sort(gold_files), 1) else ""
     has_gold <- file.exists(path_gold_file)
 
     if (has_gold) {
@@ -69,9 +74,30 @@ etl_audit <- function(dir_bronce, dir_silver, dir_gold, output_dir_report) {
             if (has_silver && has_gold) {
                 n_gold <- dbGetQuery(con, "SELECT COUNT(*) as n FROM v_gold")$n
 
+                # Hashing actualizado con GENERO y TRAMO para coincidir con Gold (SHA256)
                 sql_missing <- "
-        WITH s AS (SELECT md5(concat(RUN, DV, FECHA_NACIMIENTO, FECHA_CORTE, COD_CENTRO, ACEPTADO_RECHAZADO)) as h_id FROM v_silver),
-             g AS (SELECT md5(concat(RUN, DV, FECHA_NACIMIENTO, FECHA_CORTE, COD_CENTRO, ACEPTADO_RECHAZADO)) as h_id FROM v_gold)
+        WITH s AS (SELECT sha256(concat(
+            RUN, DV,
+            coalesce(cast(FECHA_NACIMIENTO as VARCHAR), ''),
+            coalesce(cast(FECHA_CORTE as VARCHAR), ''),
+            coalesce(NOMBRE_CENTRO, ''),
+            coalesce(COD_CENTRO, ''),
+            coalesce(ACEPTADO_RECHAZADO, ''),
+            coalesce(PREVISION, ''),
+            coalesce(GENERO, ''),
+            coalesce(TRAMO, '')
+        )) as h_id FROM v_silver),
+             g AS (SELECT sha256(concat(
+            RUN, DV,
+            coalesce(cast(FECHA_NACIMIENTO as VARCHAR), ''),
+            coalesce(cast(FECHA_CORTE as VARCHAR), ''),
+            coalesce(NOMBRE_CENTRO, ''),
+            coalesce(COD_CENTRO, ''),
+            coalesce(ACEPTADO_RECHAZADO, ''),
+            coalesce(PREVISION, ''),
+            coalesce(GENERO, ''),
+            coalesce(TRAMO, '')
+        )) as h_id FROM v_gold)
         SELECT count(*) as missing FROM s WHERE h_id NOT IN (SELECT h_id FROM g)
         "
                 n_missing <- dbGetQuery(con, sql_missing)$missing

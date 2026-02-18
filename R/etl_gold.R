@@ -101,9 +101,14 @@ etl_gold <- function(input_dir_silver, output_dir_gold) {
 
   # 5. Exportar CLEAN (rn = 1) -> Monolítico
   cat("   -> Exportando GOLD CLEAN (Monolítico)...\n")
-  # Exportamos como SINGLE FILE PARQUET (sin hive partitioning)
-  # DuckDB COPY TO puede escribir single file si terminamos en extension .parquet
-  final_parquet_file <- file.path(output_clean, "GOLD_DATASET.parquet")
+
+  # Limpiar versiones anteriores para evitar acumulacion
+  old_files <- list.files(output_clean, pattern = "PIV_MASTER_GOLD_.*\\.parquet", full.names = TRUE)
+  if (length(old_files) > 0) file.remove(old_files)
+
+  # Generar nombre con timestamp YYMMDD_HHMM
+  timestamp <- format(Sys.time(), "%y%m%d_%H%M")
+  final_parquet_file <- file.path(output_clean, glue("PIV_MASTER_GOLD_{timestamp}.parquet"))
 
   dbExecute(con, glue("COPY (SELECT * EXCLUDE(rn) FROM gold_final_logic WHERE rn = 1) TO '{final_parquet_file}' (FORMAT PARQUET)"))
 
