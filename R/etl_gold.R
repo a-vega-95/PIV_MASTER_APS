@@ -117,7 +117,7 @@ etl_gold <- function(input_dir_silver, output_dir_gold) {
   timestamp <- format(Sys.time(), "%y%m%d_%H%M")
   final_parquet_file <- file.path(output_clean, glue("PIV_MASTER_GOLD_{timestamp}.parquet"))
 
-  dbExecute(con, glue("COPY (SELECT * EXCLUDE(rn) FROM gold_final_logic WHERE rn = 1) TO '{final_parquet_file}' (FORMAT PARQUET)"))
+  dbExecute(con, glue("COPY (SELECT * EXCLUDE(rn) FROM gold_final_logic WHERE rn = 1 AND DSM_TCO = 'SI') TO '{final_parquet_file}' (FORMAT PARQUET)"))
 
   # 6. Exportar QUARANTINE (rn > 1)
   count_duplicates <- dbGetQuery(con, "SELECT COUNT(*) as n FROM gold_final_logic WHERE rn > 1")$n
