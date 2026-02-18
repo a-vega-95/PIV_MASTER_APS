@@ -1,0 +1,5 @@
+[2026-02-17 22:27:17] [START] [Anghello@DESKTOP-CVO232P] --------------- INICIO EJECUCIÓN ELT ---------------
+[2026-02-17 22:30:58] [SUCCESS] [Anghello@DESKTOP-CVO232P] Pipeline completado exitosamente.
+[2026-02-17 22:31:08] [METRICS] [Anghello@DESKTOP-CVO232P] RESUMEN TOTALES: Entrada=22458046 | Bronze=22458046 | Silver=22458046 | Gold=22338511 | Cuarentena=119535
+[2026-02-17 22:31:08] [END] [Anghello@DESKTOP-CVO232P] --------------- FIN EJECUCIÓN ELT ---------------
+
