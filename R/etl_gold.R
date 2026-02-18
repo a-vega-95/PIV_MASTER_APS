@@ -13,7 +13,10 @@ etl_gold <- function(input_dir_silver, output_dir_gold) {
   output_clean <- file.path(output_dir_gold, "DATASET_FINAL")
   output_quarantine <- file.path(output_dir_gold, "QUARANTINE_DUPLICATOS")
 
-  if (dir.exists(output_dir_gold)) fs::dir_delete(output_dir_gold)
+  if (dir.exists(output_dir_gold)) {
+    files <- list.files(output_dir_gold, full.names = TRUE, recursive = TRUE)
+    unlink(files, force = TRUE)
+  }
   dir.create(output_clean, recursive = TRUE)
   dir.create(output_quarantine, recursive = TRUE)
 
@@ -60,6 +63,11 @@ etl_gold <- function(input_dir_silver, output_dir_gold) {
     -- Logica de Negocio
     regexp_replace(RUN || DV, '[^0-9Kk]', '', 'g') AS ID_PCTE,
     CASE WHEN NOMBRE_CENTRO IN (", centros_sql, ") THEN 'SI' ELSE 'NO' END AS DSM_TCO,
+    CASE
+        WHEN GENERO IN ('F', 'MUJER') THEN 'FEMENINO'
+        WHEN GENERO IN ('M', 'HOMBRE') THEN 'MASCULINO'
+        ELSE 'NO DEFINIDO'
+    END AS GENERO_NORMALIZADO,
     date_diff('year', FECHA_NACIMIENTO, FECHA_CORTE) AS EDAD_EN_FECHA_CORTE,
     CASE
       WHEN date_diff('year', FECHA_NACIMIENTO, FECHA_CORTE) < 1 THEN 'Menos de 1 año'
