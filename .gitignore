@@ -1,0 +1,9 @@
+.Rhistory
+.Rproj.user/
+
+# Data files
+*.xlsx
+*.txt
+*.csv
+*.parquet
+_targets/
