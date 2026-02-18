@@ -35,7 +35,7 @@ etl_gold <- function(input_dir_silver, output_dir_gold) {
   )
   centros_sql <- paste(sprintf("'%s'", centros_dsm), collapse = ", ")
 
-  cat("\n🌟 [ELT-GOLD] Generando RAW con Hash SHA256...\n")
+  cat("\n[ELT-GOLD] Generando RAW con Hash SHA256...\n")
 
   # 3. Preparar Base + Hash SHA256
   # Definimos la llave única de negocio: RUN-DV-FECHA_CORTE-COD_CENTRO-ESTADO
@@ -111,11 +111,11 @@ etl_gold <- function(input_dir_silver, output_dir_gold) {
   count_duplicates <- dbGetQuery(con, "SELECT COUNT(*) as n FROM gold_final_logic WHERE rn > 1")$n
 
   if (count_duplicates > 0) {
-    cat(sprintf("   ⚠️  Se encontraron %d registros duplicados. Moviendo a Cuarentena...\n", count_duplicates))
+    cat(sprintf("   [ALERTA] Se encontraron %d registros duplicados. Moviendo a Cuarentena...\n", count_duplicates))
     quarantine_file <- file.path(output_quarantine, "QUARANTINE_DUPLICATES.parquet")
     dbExecute(con, glue("COPY (SELECT * FROM gold_final_logic WHERE rn > 1) TO '{quarantine_file}' (FORMAT PARQUET)"))
   } else {
-    cat("   ✅ No se encontraron duplicados.\n")
+    cat("   [OK] No se encontraron duplicados.\n")
   }
 
   return(output_clean)

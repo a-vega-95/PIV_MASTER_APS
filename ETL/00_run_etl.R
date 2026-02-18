@@ -5,7 +5,7 @@
 if (!require("pacman")) install.packages("pacman")
 pacman::p_load(targets, tarchetypes, here)
 
-cat("\n🚀 [TARGETS] Iniciando Pipeline ELT...\n")
+cat("\n[TARGETS] Iniciando Pipeline ELT...\n")
 
 # --- CONFIGURACIÓN LOG MAESTRO ---
 log_dir <- here::here("ETL", "LOG_ETL")
@@ -31,7 +31,7 @@ tryCatch(
     targets::tar_make()
 
     log_msg("Pipeline completado exitosamente.", "SUCCESS")
-    cat("\n✅ [TARGETS] OK.\n")
+    cat("\n[TARGETS] OK.\n")
 
     # --- REPORTING TOTALES (Solo si éxito) ---
     try({
@@ -85,7 +85,7 @@ tryCatch(
   },
   error = function(e) {
     log_msg(paste("Error crítico en el pipeline:", e$message), "ERROR")
-    cat("\n❌ [TARGETS] Error.\n")
+    cat("\n[TARGETS] Error.\n")
     message(e)
   }
 )
