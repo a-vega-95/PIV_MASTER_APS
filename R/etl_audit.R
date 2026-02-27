@@ -12,8 +12,13 @@ etl_audit <- function(dir_bronce, dir_silver, dir_gold, output_dir_report) {
     con <- dbConnect(duckdb::duckdb())
     on.exit(dbDisconnect(con, shutdown = TRUE))
 
-    # Path to monolithic Gold
-    path_gold_file <- file.path(dir_gold, "DATASET_FINAL", "GOLD_DATASET.parquet")
+    # Path to monolithic Gold (Dynamic Timestamp)
+    # Buscamos el archivo PIV_MASTER_GOLD_YYMMDD_HHMM.parquet más reciente
+    path_gold_dir <- file.path(dir_gold, "DATASET_FINAL")
+    gold_files <- list.files(path_gold_dir, pattern = "PIV_MASTER_GOLD_.*\\.parquet", full.names = TRUE)
+
+    # Asumimos que hay uno solo si limpiamos antes, o tomamos el último alfabéticamente (fecha más reciente)
+    path_gold_file <- if (length(gold_files) > 0) tail(sort(gold_files), 1) else ""
     has_gold <- file.exists(path_gold_file)
 
     if (has_gold) {
@@ -65,23 +70,52 @@ etl_audit <- function(dir_bronce, dir_silver, dir_gold, output_dir_report) {
                 ))
             }
 
+            # 2. Centros DSM Mapping (Duplicado de Gold para consistencia en Auditoría)
+            centros_dsm <- c(
+                "CENTRO DE SALUD FAMILIAR AMANECER", "CENTRO COMUNITARIO DE SALUD FAMILIAR ARQUENCO",
+                "CENTRO DE SALUD FAMILIAR EL CARMEN", "CENTRO COMUNITARIO DE SALUD FAMILIAR VILLA EL SALAR",
+                "CENTRO DE SALUD FAMILIAR LABRANZA", "CENTRO COMUNITARIO DE SALUD FAMILIAR LAS QUILAS",
+                "CENTRO DE SALUD DOCENTE ASISTENCIAL MONSEÑOR SERGIO VALECH", "CENTRO DE SALUD FAMILIAR PEDRO DE VALDIVIA (TEMUCO)",
+                "POSTA DE SALUD RURAL COLLIMALLÍN", "POSTA DE SALUD RURAL CONOCO", "CENTRO DE SALUD FAMILIAR PUEBLO NUEVO",
+                "CENTRO DE SALUD FAMILIAR SANTA ROSA", "CENTRO DE SALUD FAMILIAR VILLA ALEGRE (TEMUCO)"
+            )
+            centros_sql <- paste(sprintf("'%s'", centros_dsm), collapse = ", ")
+
             # SILVER VS GOLD
             if (has_silver && has_gold) {
+                # Contamos Silver FILTRADO por el criterio de negocio (DSM_TCO = SI)
+                n_silver_filtered <- dbGetQuery(con, glue("SELECT COUNT(*) as n FROM v_silver WHERE NOMBRE_CENTRO IN ({centros_sql})"))$n
                 n_gold <- dbGetQuery(con, "SELECT COUNT(*) as n FROM v_gold")$n
 
-                sql_missing <- "
-        WITH s AS (SELECT md5(concat(RUN, DV, FECHA_NACIMIENTO, FECHA_CORTE, COD_CENTRO, ACEPTADO_RECHAZADO)) as h_id FROM v_silver),
-             g AS (SELECT md5(concat(RUN, DV, FECHA_NACIMIENTO, FECHA_CORTE, COD_CENTRO, ACEPTADO_RECHAZADO)) as h_id FROM v_gold)
+                # Hashing actualizado con GENERO y TRAMO para coincidir con Gold (SHA256)
+                # Aplicamos el filtro TAMBIÉN en la CTE de Silver para comparar peras con peras
+                sql_missing <- glue("
+        WITH s AS (SELECT sha256(concat(
+            RUN, DV,
+            coalesce(cast(FECHA_NACIMIENTO as VARCHAR), ''),
+            coalesce(cast(FECHA_CORTE as VARCHAR), ''),
+            coalesce(NOMBRE_CENTRO, ''),
+            coalesce(COD_CENTRO, ''),
+            coalesce(ACEPTADO_RECHAZADO, ''),
+            coalesce(GENERO, ''),
+            coalesce(TRAMO, '')
+        )) as h_id FROM v_silver WHERE NOMBRE_CENTRO IN ({centros_sql})),
+             g AS (SELECT sha256(concat(
+            RUN, DV,
+            coalesce(cast(FECHA_NACIMIENTO as VARCHAR), ''),
+            coalesce(cast(FECHA_CORTE as VARCHAR), ''),
+            coalesce(NOMBRE_CENTRO, ''),
+            coalesce(COD_CENTRO, ''),
+            coalesce(ACEPTADO_RECHAZADO, ''),
+            coalesce(GENERO, ''),
+            coalesce(TRAMO, '')
+        )) as h_id FROM v_gold)
         SELECT count(*) as missing FROM s WHERE h_id NOT IN (SELECT h_id FROM g)
-        "
+        ")
                 n_missing <- dbGetQuery(con, sql_missing)$missing
 
-                # DIFF logic change: Gold has FEWER rows due to deduplication.
-                # So n_gold < n_silver is EXPECTED now.
-                # n_missing represents rows in Silver NOT in Gold (duplicates removed or lost).
-
                 resumen <- rbind(resumen, data.frame(
-                    ETAPA = "SILVER_VS_GOLD_DEDUP", IN = n_silver, OUT = n_gold, DIFF = n_silver - n_gold, PCT = (n_gold / n_silver) * 100
+                    ETAPA = "SILVER_VS_GOLD_DEDUP_FILTERED", IN = n_silver_filtered, OUT = n_gold, DIFF = n_silver_filtered - n_gold, PCT = (n_gold / n_silver_filtered) * 100
                 ))
             }
 

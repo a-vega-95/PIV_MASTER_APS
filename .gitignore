@@ -7,3 +7,4 @@
 *.csv
 *.parquet
 _targets/
+*.log

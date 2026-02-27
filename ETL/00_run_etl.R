@@ -5,7 +5,7 @@
 if (!require("pacman")) install.packages("pacman")
 pacman::p_load(targets, tarchetypes, here)
 
-cat("\n🚀 [TARGETS] Iniciando Pipeline ELT...\n")
+cat("\n[TARGETS] Iniciando Pipeline ELT...\n")
 
 # --- CONFIGURACIÓN LOG MAESTRO ---
 log_dir <- here::here("ETL", "LOG_ETL")
@@ -31,7 +31,7 @@ tryCatch(
     targets::tar_make()
 
     log_msg("Pipeline completado exitosamente.", "SUCCESS")
-    cat("\n✅ [TARGETS] OK.\n")
+    cat("\n[TARGETS] OK.\n")
 
     # --- REPORTING TOTALES (Solo si éxito) ---
     try({
@@ -63,7 +63,13 @@ tryCatch(
 
       # 4. Gold (Monolithic + Quarantine)
       dir_gold <- here::here("DATOS", "DATOS_GOLD")
-      file_gold <- file.path(dir_gold, "DATASET_FINAL", "GOLD_DATASET.parquet")
+
+      # Buscar el último archivo generado por timestamp
+      path_gold_dir <- file.path(dir_gold, "DATASET_FINAL")
+      gold_files <- list.files(path_gold_dir, pattern = "PIV_MASTER_GOLD_.*\\.parquet", full.names = TRUE)
+
+      file_gold <- if (length(gold_files) > 0) tail(sort(gold_files), 1) else ""
+
       file_quarantine <- file.path(dir_gold, "QUARANTINE_DUPLICATOS", "QUARANTINE_DUPLICATES.parquet")
 
       total_gold <- 0
@@ -85,7 +91,7 @@ tryCatch(
   },
   error = function(e) {
     log_msg(paste("Error crítico en el pipeline:", e$message), "ERROR")
-    cat("\n❌ [TARGETS] Error.\n")
+    cat("\n[TARGETS] Error.\n")
     message(e)
   }
 )

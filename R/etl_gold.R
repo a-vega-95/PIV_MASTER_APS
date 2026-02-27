@@ -13,7 +13,10 @@ etl_gold <- function(input_dir_silver, output_dir_gold) {
   output_clean <- file.path(output_dir_gold, "DATASET_FINAL")
   output_quarantine <- file.path(output_dir_gold, "QUARANTINE_DUPLICATOS")
 
-  if (dir.exists(output_dir_gold)) fs::dir_delete(output_dir_gold)
+  if (dir.exists(output_dir_gold)) {
+    files <- list.files(output_dir_gold, full.names = TRUE, recursive = TRUE)
+    unlink(files, force = TRUE)
+  }
   dir.create(output_clean, recursive = TRUE)
   dir.create(output_quarantine, recursive = TRUE)
 
@@ -35,7 +38,7 @@ etl_gold <- function(input_dir_silver, output_dir_gold) {
   )
   centros_sql <- paste(sprintf("'%s'", centros_dsm), collapse = ", ")
 
-  cat("\n🌟 [ELT-GOLD] Generando RAW con Hash SHA256...\n")
+  cat("\n[ELT-GOLD] Generando RAW con Hash SHA256...\n")
 
   # 3. Preparar Base + Hash SHA256
   # Definimos la llave única de negocio: RUN-DV-FECHA_CORTE-COD_CENTRO-ESTADO
@@ -52,14 +55,20 @@ etl_gold <- function(input_dir_silver, output_dir_gold) {
       coalesce(NOMBRE_CENTRO, ''),
       coalesce(COD_CENTRO, ''),
       coalesce(ACEPTADO_RECHAZADO, ''),
-      coalesce(PREVISION, ''),
+      coalesce(GENERO, ''),
+      coalesce(TRAMO, ''),
       anio, mes
     )) AS ROW_HASH,
 
     -- Logica de Negocio
     regexp_replace(RUN || DV, '[^0-9Kk]', '', 'g') AS ID_PCTE,
     CASE WHEN NOMBRE_CENTRO IN (", centros_sql, ") THEN 'SI' ELSE 'NO' END AS DSM_TCO,
-    date_diff('year', FECHA_NACIMIENTO, FECHA_CORTE) AS EDAD,
+    CASE
+        WHEN GENERO IN ('F', 'MUJER') THEN 'FEMENINO'
+        WHEN GENERO IN ('M', 'HOMBRE') THEN 'MASCULINO'
+        ELSE 'NO DEFINIDO'
+    END AS GENERO_NORMALIZADO,
+    date_diff('year', FECHA_NACIMIENTO, FECHA_CORTE) AS EDAD_EN_FECHA_CORTE,
     CASE
       WHEN date_diff('year', FECHA_NACIMIENTO, FECHA_CORTE) < 1 THEN 'Menos de 1 año'
       WHEN date_diff('year', FECHA_NACIMIENTO, FECHA_CORTE) BETWEEN 1 AND 4 THEN '1 - 4 años'
@@ -98,22 +107,99 @@ etl_gold <- function(input_dir_silver, output_dir_gold) {
   dbExecute(con, sql_dedup)
 
   # 5. Exportar CLEAN (rn = 1) -> Monolítico
-  cat("   -> Exportando GOLD CLEAN (Monolítico)...\n")
-  # Exportamos como SINGLE FILE PARQUET (sin hive partitioning)
-  # DuckDB COPY TO puede escribir single file si terminamos en extension .parquet
-  final_parquet_file <- file.path(output_clean, "GOLD_DATASET.parquet")
+  # 5. Exportar GOLD CLEAN (Optimización Senior)
+  cat("   -> Exportando GOLD CLEAN (Monolítico, Optimizado y Sin Basura)...\n")
 
-  dbExecute(con, glue("COPY (SELECT * EXCLUDE(rn) FROM gold_final_logic WHERE rn = 1) TO '{final_parquet_file}' (FORMAT PARQUET)"))
+  # Limpieza de archivos previos
+  old_files <- list.files(output_clean, pattern = "PIV_MASTER_GOLD_.*\\.parquet", full.names = TRUE)
+  if (length(old_files) > 0) file.remove(old_files)
+
+  timestamp <- format(Sys.time(), "%y%m%d_%H%M")
+  final_parquet_file <- file.path(output_clean, glue("PIV_MASTER_GOLD_{timestamp}.parquet"))
+
+  # --- LA MAGIA ESTÁ AQUÍ ---
+  sql_export <- glue("
+      COPY (
+        SELECT
+            * EXCLUDE(rn, ROW_HASH) -- 1. ELIMINAMOS COLUMNAS DE PROCESO (Basura en Gold)
+        FROM gold_final_logic
+        WHERE rn = 1
+          AND DSM_TCO = 'SI'
+        ORDER BY
+            NOMBRE_CENTRO ASC,      -- 2. CLUSTERING: Agrupa datos por centro (Mejor compresión)
+            FECHA_CORTE ASC,        -- Orden Cronológico
+            GENERO_NORMALIZADO,     -- Agrupa Strings repetidos
+            GRUPO_ETARIO            -- Agrupa Strings repetidos
+      ) TO '{final_parquet_file}'
+      (
+        FORMAT PARQUET,
+        COMPRESSION 'ZSTD',         -- 3. ALGORITMO: Estándar moderno (mejor que Snappy)
+        COMPRESSION_LEVEL 10,       -- NIVEL: 10 es agresivo pero seguro para lectura
+        ROW_GROUP_SIZE 1000000      -- BLOQUES: 1M filas por bloque optimiza metadatos para 22M regs
+      )
+  ")
+
+  dbExecute(con, sql_export)
+
+  # Validación Post-Exportación (Opcional pero recomendado)
+  cat(paste0("   [EXITO] Archivo generado: ", basename(final_parquet_file), "\n"))
 
   # 6. Exportar QUARANTINE (rn > 1)
   count_duplicates <- dbGetQuery(con, "SELECT COUNT(*) as n FROM gold_final_logic WHERE rn > 1")$n
 
   if (count_duplicates > 0) {
-    cat(sprintf("   ⚠️  Se encontraron %d registros duplicados. Moviendo a Cuarentena...\n", count_duplicates))
+    cat(sprintf("   [ALERTA] Se encontraron %d registros duplicados. Moviendo a Cuarentena...\n", count_duplicates))
     quarantine_file <- file.path(output_quarantine, "QUARANTINE_DUPLICATES.parquet")
     dbExecute(con, glue("COPY (SELECT * FROM gold_final_logic WHERE rn > 1) TO '{quarantine_file}' (FORMAT PARQUET)"))
   } else {
-    cat("   ✅ No se encontraron duplicados.\n")
+    cat("   [OK] No se encontraron duplicados.\n")
+  }
+
+  # --- NUEVO: EXPORTACIÓN CORTE SEPTIEMBRE ---
+  cat("\n[ELT-GOLD] Generando Productos Especiales: Corte Septiembre...\n")
+  require(writexl)
+
+  output_sept <- file.path(output_dir_gold, "DATASET_FINAL", "PIVs_CORTE_SEPT")
+  if (!dir.exists(output_sept)) dir.create(output_sept, recursive = TRUE)
+
+  # Obtener años disponibles en el corte de Septiembre
+  anios_sept <- dbGetQuery(con, "SELECT DISTINCT anio FROM gold_final_logic WHERE mes = 9 AND rn = 1 AND DSM_TCO = 'SI' ORDER BY anio")$anio
+
+  if (length(anios_sept) > 0) {
+    for (a in anios_sept) {
+      cat(glue("   -> Procesando Año {a} [Corte Septiembre]...\n"))
+
+      # Carpeta por año
+      path_anio <- file.path(output_sept, as.character(a))
+      if (!dir.exists(path_anio)) dir.create(path_anio, recursive = TRUE)
+
+      # Nombres de archivos
+      base_name <- glue("{a}_CORT_SEPT_PIV")
+      file_parquet <- file.path(path_anio, paste0(base_name, ".parquet"))
+      file_excel <- file.path(path_anio, paste0(base_name, ".xlsx"))
+
+      # 1. Exportar Parquet (vía DuckDB para velocidad)
+      sql_sept_path <- glue("
+        COPY (
+          SELECT * EXCLUDE(rn, ROW_HASH)
+          FROM gold_final_logic
+          WHERE mes = 9 AND anio = {a} AND rn = 1 AND DSM_TCO = 'SI'
+        ) TO '{file_parquet}' (FORMAT PARQUET, COMPRESSION 'ZSTD')
+      ")
+      dbExecute(con, sql_sept_path)
+
+      # 2. Exportar Excel (vía R/writexl para compatibilidad)
+      df_sept <- dbGetQuery(con, glue("
+          SELECT * EXCLUDE(rn, ROW_HASH)
+          FROM gold_final_logic
+          WHERE mes = 9 AND anio = {a} AND rn = 1 AND DSM_TCO = 'SI'
+      "))
+      writexl::write_xlsx(df_sept, path = file_excel)
+
+      cat(glue("      [OK] Guardados: {basename(file_parquet)} y {basename(file_excel)}\n"))
+    }
+  } else {
+    cat("   [!] No se encontraron datos para el mes de Septiembre (mes = 9).\n")
   }
 
   return(output_clean)

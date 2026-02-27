@@ -40,14 +40,28 @@ etl_transform <- function(input_dir_bronze, output_dir_silver) {
     col_cen <- get_coalesce(c("NOMBRE_CENTRO", "CENTRO_SALUD", "ESTABLECIMIENTO"))
     col_cod <- get_coalesce(c("COD_CENTRO", "CODIGO_CENTRO", "CODIGO_CENTRO_PROCEDENCIA"))
     col_ace <- get_coalesce(c("ACEPTADO_RECHAZADO", "SITUACION", "ESTADO"))
-    col_pre <- get_coalesce(c("PREVISION"))
+    col_gen <- get_coalesce(c("GENERO", "SEXO"))
+    col_tra <- get_coalesce(c("TRAMO", "TRAMO_PREVISION", "NIVEL"))
 
     # Source file handling
     col_src <- "source_file"
     if (!("source_file" %in% cols_bronce)) col_src <- "'Unknown'"
 
-    sql_nac <- glue("COALESCE(try_strptime(TRIM({col_nac}), '%d/%m/%Y'), try_strptime(TRIM({col_nac}), '%Y-%m-%d'), NULL)")
-    sql_cor <- glue("COALESCE(try_strptime(TRIM({col_cor}), '%d/%m/%Y'), try_strptime(TRIM({col_cor}), '%Y-%m-%d'), NULL)")
+    # Mejorar parsing de fechas: Intentar varios formatos conocidos
+    # Formatos posibles: DD/MM/YYYY, YYYY-MM-DD, DD-MM-YYYY
+    sql_nac <- glue("COALESCE(
+        try_strptime(TRIM({col_nac}), '%d/%m/%Y'),
+        try_strptime(TRIM({col_nac}), '%Y-%m-%d'),
+        try_strptime(TRIM({col_nac}), '%d-%m-%Y'),
+        NULL
+    )")
+
+    sql_cor <- glue("COALESCE(
+        try_strptime(TRIM({col_cor}), '%d/%m/%Y'),
+        try_strptime(TRIM({col_cor}), '%Y-%m-%d'),
+        try_strptime(TRIM({col_cor}), '%d-%m-%Y'),
+        NULL
+    )")
 
     sql_transform <- glue("
   CREATE OR REPLACE TABLE silver_temp AS
@@ -59,7 +73,8 @@ etl_transform <- function(input_dir_bronze, output_dir_silver) {
     TRIM(UPPER({col_cen})) AS NOMBRE_CENTRO,
     TRIM(UPPER({col_cod})) AS COD_CENTRO,
     TRIM(UPPER({col_ace})) AS ACEPTADO_RECHAZADO,
-    TRIM(UPPER({col_pre})) AS PREVISION,
+    TRIM(UPPER({col_gen})) AS GENERO,
+    TRIM(UPPER({col_tra})) AS TRAMO,
     anio, mes,
     {col_src} AS source_file
   FROM bronze_view
